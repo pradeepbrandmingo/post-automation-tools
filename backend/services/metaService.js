@@ -171,12 +171,14 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
  */
 const exchangeInstagramCode = async ({ code, callbackUri, appId, appSecret }) => {
   try {
+    const cleanCode = code ? String(code).split('#_')[0].split('#')[0] : code;
+    const cleanUri = callbackUri ? String(callbackUri).split('#')[0] : callbackUri;
     const params = new URLSearchParams();
     params.append('client_id', appId);
     params.append('client_secret', appSecret);
     params.append('grant_type', 'authorization_code');
-    params.append('redirect_uri', callbackUri);
-    params.append('code', code);
+    params.append('redirect_uri', cleanUri);
+    params.append('code', cleanCode);
 
     const response = await axios.post('https://api.instagram.com/oauth/access_token', params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }

@@ -251,22 +251,41 @@ const exchangeInstagramCode = async ({ code, callbackUri, appId, appSecret }) =>
 
 /**
  * Exchange short-lived Instagram token for long-lived token (60 days)
+ * Note: Instagram Graph API enforces POST with form-urlencoded body
  */
 const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
   try {
-    const response = await axios.get('https://graph.instagram.com/access_token', {
-      params: {
-        grant_type: 'ig_exchange_token',
-        client_secret: appSecret,
-        access_token: shortToken
-      }
+    const params = new URLSearchParams();
+    params.append('grant_type', 'ig_exchange_token');
+    params.append('client_secret', appSecret);
+    params.append('access_token', shortToken);
+
+    // Official Meta standard: POST to graph.instagram.com/access_token
+    const response = await axios.post('https://graph.instagram.com/access_token', params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
+
     if (response.data && response.data.access_token) {
+      console.log('✅ Acquired genuine 60-day Instagram publishing token via POST');
       return response.data.access_token;
     }
     return shortToken;
-  } catch (error) {
-    console.warn('Instagram Long-Lived Token warning (falling back to shortToken):', error.response?.data || error.message);
+  } catch (postError) {
+    console.warn('POST ig_exchange_token failed, trying GET fallback:', postError.response?.data || postError.message);
+    try {
+      const getRes = await axios.get('https://graph.instagram.com/access_token', {
+        params: {
+          grant_type: 'ig_exchange_token',
+          client_secret: appSecret,
+          access_token: shortToken
+        }
+      });
+      if (getRes.data && getRes.data.access_token) {
+        return getRes.data.access_token;
+      }
+    } catch (getErr) {
+      console.warn('GET ig_exchange_token fallback note:', getErr.response?.data || getErr.message);
+    }
     return shortToken;
   }
 };

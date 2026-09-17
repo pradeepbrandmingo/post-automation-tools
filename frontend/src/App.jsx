@@ -10,6 +10,8 @@ import { CreatePostPage } from './pages/CreatePostPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { TermsPage } from './pages/TermsPage';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 
 
@@ -83,6 +85,14 @@ const AppContent = () => {
         navigate('/accounts');
       }} />
     );
+  }
+
+  if (pathname === '/privacy') {
+    return <PrivacyPage />;
+  }
+
+  if (pathname === '/terms') {
+    return <TermsPage />;
   }
 
   if (!isAuthenticated || pathname === '/login') {

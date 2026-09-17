@@ -224,12 +224,13 @@ router.get('/instagram-callback', async (req, res) => {
     const tokenResult = await exchangeInstagramCode({ code, callbackUri, appId: IG_APP_ID, appSecret: IG_APP_SECRET });
     const shortToken = typeof tokenResult === 'string' ? tokenResult : tokenResult.accessToken;
     const initialUserId = tokenResult?.userId;
+    const initialUsername = tokenResult?.username;
 
     // Exchange for long-lived token (60 days) with safe fallback
     const longToken = await getInstagramLongLivedToken({ shortToken, appSecret: IG_APP_SECRET });
 
     // Get Instagram user info with safe fallback
-    const igUser = await getInstagramUserInfo(longToken || shortToken, initialUserId);
+    const igUser = await getInstagramUserInfo(longToken || shortToken, initialUserId, initialUsername);
 
     console.log('📸 Instagram user info:', igUser);
 

@@ -189,6 +189,7 @@ const exchangeInstagramCode = async ({ code, callbackUri, appId, appSecret }) =>
     return {
       accessToken: response.data.access_token,
       userId: response.data.user_id || response.data.id,
+      username: response.data.username || response.data.user?.username || null,
       data: response.data
     };
   } catch (error) {
@@ -222,8 +223,30 @@ const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
 /**
  * Get Instagram user profile info (id, username)
  */
-const getInstagramUserInfo = async (accessToken, fallbackUserId) => {
-  // 1. Try graph.instagram.com/me
+const getInstagramUserInfo = async (accessToken, fallbackUserId, fallbackUsername) => {
+  // 1. If username was provided directly in OAuth token exchange payload
+  if (fallbackUsername) {
+    return { id: String(fallbackUserId), username: fallbackUsername };
+  }
+
+  // 2. Try graph.instagram.com/{userId}
+  if (fallbackUserId) {
+    try {
+      const response = await axios.get(`https://graph.instagram.com/${fallbackUserId}`, {
+        params: {
+          fields: 'id,username,name,profile_picture_url',
+          access_token: accessToken
+        }
+      });
+      if (response.data && response.data.username) {
+        return response.data;
+      }
+    } catch (err) {
+      console.warn('graph.instagram.com/{userId} note:', err.response?.data || err.message);
+    }
+  }
+
+  // 3. Try graph.instagram.com/me
   try {
     const response = await axios.get('https://graph.instagram.com/me', {
       params: {
@@ -231,29 +254,30 @@ const getInstagramUserInfo = async (accessToken, fallbackUserId) => {
         access_token: accessToken
       }
     });
-    if (response.data && response.data.id) {
+    if (response.data && response.data.username) {
       return response.data;
     }
   } catch (error) {
     console.warn('graph.instagram.com/me query note:', error.response?.data || error.message);
   }
 
-  // 2. Try graph.facebook.com/v19.0/me
+  // 4. Try graph.facebook.com/v19.0/{userId}
   try {
-    const fbResponse = await axios.get('https://graph.facebook.com/v19.0/me', {
+    const endpoint = fallbackUserId ? `https://graph.facebook.com/v19.0/${fallbackUserId}` : 'https://graph.facebook.com/v19.0/me';
+    const fbResponse = await axios.get(endpoint, {
       params: {
-        fields: 'id,name',
+        fields: 'id,username,name',
         access_token: accessToken
       }
     });
-    if (fbResponse.data && fbResponse.data.id) {
-      return { id: fbResponse.data.id, username: fbResponse.data.name || fbResponse.data.id };
+    if (fbResponse.data && (fbResponse.data.username || fbResponse.data.name)) {
+      return { id: fbResponse.data.id, username: fbResponse.data.username || fbResponse.data.name };
     }
   } catch (fbErr) {
-    console.warn('graph.facebook.com/v19.0/me fallback note:', fbErr.response?.data || fbErr.message);
+    console.warn('graph.facebook.com/v19.0 fallback note:', fbErr.response?.data || fbErr.message);
   }
 
-  // 3. If API rejected GET on /me, use fallbackUserId from initial token exchange
+  // 5. Fallback with userId
   if (fallbackUserId) {
     return { id: String(fallbackUserId), username: `instagram_${fallbackUserId}` };
   }

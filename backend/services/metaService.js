@@ -88,10 +88,16 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       throw new Error('Instagram requires an image or video URL for posts');
     }
 
+    // Format URL for Instagram: if using Cloudinary, ensure JPEG output
+    let finalMediaUrl = mediaUrl;
+    if (finalMediaUrl.includes('cloudinary.com') && !finalMediaUrl.includes('/f_jpg')) {
+      finalMediaUrl = finalMediaUrl.replace('/upload/', '/upload/f_jpg,q_auto/');
+    }
+
     // Step 1: Create Container
     const containerRes = await axios.post(`${BASE_URL}/${igUserId}/media`, null, {
       params: {
-        image_url: mediaUrl,
+        image_url: finalMediaUrl,
         caption: caption,
         access_token: pageAccessToken
       }

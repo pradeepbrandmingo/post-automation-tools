@@ -126,9 +126,22 @@ export const CalendarView = ({ posts, onRefresh }) => {
                     {post.mediaUrl && (
                       <img src={post.mediaUrl} alt="Post Media" className="w-14 h-14 rounded-lg object-cover border border-slate-200 shrink-0" />
                     )}
-                    <p className="text-xs text-slate-800 line-clamp-3 leading-relaxed font-medium">
-                      {post.caption}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-slate-800 line-clamp-3 leading-relaxed font-medium">
+                        {post.caption}
+                      </p>
+                      {/* Error details if failed */}
+                      {isFailed && post.publishResults && post.publishResults.some(r => r.error) && (
+                        <div className="mt-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] leading-snug">
+                          {post.publishResults.map((r, i) => r.error ? (
+                            <div key={i} className="flex items-start gap-1">
+                              <span className="font-bold text-rose-900 shrink-0">{r.accountName || r.platform}:</span>
+                              <span>{r.error}</span>
+                            </div>
+                          ) : null)}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 

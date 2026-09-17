@@ -12,6 +12,7 @@ import { AccountsPage } from './pages/AccountsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { TermsPage } from './pages/TermsPage';
+import { DataDeletionPage } from './pages/DataDeletionPage';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 
 
@@ -93,6 +94,10 @@ const AppContent = () => {
 
   if (pathname === '/terms') {
     return <TermsPage />;
+  }
+
+  if (pathname === '/data-deletion') {
+    return <DataDeletionPage />;
   }
 
   if (!isAuthenticated || pathname === '/login') {

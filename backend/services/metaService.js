@@ -163,9 +163,75 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
   }
 };
 
+// ─── INSTAGRAM LOGIN API FUNCTIONS ────────────────────────────────────────────
+
+/**
+ * Exchange Instagram OAuth code for short-lived access token
+ * Used with Instagram Login API (direct Instagram login, not Facebook)
+ */
+const exchangeInstagramCode = async ({ code, callbackUri, appId, appSecret }) => {
+  try {
+    const params = new URLSearchParams();
+    params.append('client_id', appId);
+    params.append('client_secret', appSecret);
+    params.append('grant_type', 'authorization_code');
+    params.append('redirect_uri', callbackUri);
+    params.append('code', code);
+
+    const response = await axios.post('https://api.instagram.com/oauth/access_token', params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
+    return response.data.access_token;
+  } catch (error) {
+    console.error('Instagram Code Exchange Error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error_message || 'Failed to exchange Instagram code');
+  }
+};
+
+/**
+ * Exchange short-lived Instagram token for long-lived token (60 days)
+ */
+const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
+  try {
+    const response = await axios.get('https://graph.instagram.com/access_token', {
+      params: {
+        grant_type: 'ig_exchange_token',
+        client_secret: appSecret,
+        access_token: shortToken
+      }
+    });
+    return response.data.access_token;
+  } catch (error) {
+    console.error('Instagram Long-Lived Token Error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error?.message || 'Failed to get long-lived Instagram token');
+  }
+};
+
+/**
+ * Get Instagram user profile info (id, username, profile_picture_url, account_type)
+ */
+const getInstagramUserInfo = async (accessToken) => {
+  try {
+    const response = await axios.get('https://graph.instagram.com/me', {
+      params: {
+        fields: 'id,username,profile_picture_url,account_type,name',
+        access_token: accessToken
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Instagram User Info Error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error?.message || 'Failed to fetch Instagram user info');
+  }
+};
+
 export {
   exchangeShortToLongToken,
   getUserPagesAndInstagram,
   publishToFacebookPage,
-  publishToInstagramBusiness
+  publishToInstagramBusiness,
+  exchangeInstagramCode,
+  getInstagramLongLivedToken,
+  getInstagramUserInfo
 };

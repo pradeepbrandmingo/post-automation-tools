@@ -38,6 +38,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+
 // Setup Fallback Local Cron Job (Runs every 1 minute)
 cron.schedule('* * * * *', async () => {
   try {

@@ -5,10 +5,14 @@ import { useToast } from '../common/Toast';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
-const getInitiateUrl = (platform) => {
-  // Use api.token (in-memory) with localStorage as fallback
+const getFacebookUrl = () => {
   const authToken = api.token || localStorage.getItem('meta_autopost_token') || '';
-  return `${API_BASE}/api/accounts/meta-initiate?platform=${platform}&authToken=${encodeURIComponent(authToken)}`;
+  return `${API_BASE}/api/accounts/meta-initiate?platform=facebook&authToken=${encodeURIComponent(authToken)}`;
+};
+
+const getInstagramUrl = () => {
+  const authToken = api.token || localStorage.getItem('meta_autopost_token') || '';
+  return `${API_BASE}/api/accounts/instagram-initiate?authToken=${encodeURIComponent(authToken)}`;
 };
 
 export const MetaOnboarding = ({ onAccountConnected }) => {
@@ -26,21 +30,25 @@ export const MetaOnboarding = ({ onAccountConnected }) => {
     setLoadingPlatform(platform);
     showToast(`Opening ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Login...`, 'info');
 
-    const popup = window.open(getInitiateUrl(platform), `${platform}_oauth`, 'width=620,height=680');
+    // Use separate OAuth URLs for Facebook and Instagram
+    const url = platform === 'instagram' ? getInstagramUrl() : getFacebookUrl();
+    const popup = window.open(url, `${platform}_oauth`, 'width=620,height=720');
 
     const checkPopup = setInterval(() => {
       try {
         // Detect when popup redirects back to our frontend domain
         if (popup && popup.location && popup.location.href && popup.location.href.includes(window.location.hostname)) {
-          const url = new URL(popup.location.href);
+          const popupUrl = new URL(popup.location.href);
           popup.close();
           clearInterval(checkPopup);
           setLoadingPlatform(null);
 
-          if (url.searchParams.get('oauth_success')) {
-            showToast('🎉 Meta account connected successfully!', 'success');
-          } else if (url.searchParams.get('oauth_error')) {
-            const errMsg = url.searchParams.get('oauth_error');
+          if (popupUrl.searchParams.get('oauth_success')) {
+            const connectedPlatform = popupUrl.searchParams.get('platform');
+            const platformName = connectedPlatform === 'instagram' ? 'Instagram' : 'Facebook';
+            showToast(`🎉 ${platformName} account connected successfully!`, 'success');
+          } else if (popupUrl.searchParams.get('oauth_error')) {
+            const errMsg = popupUrl.searchParams.get('oauth_error');
             if (errMsg === 'no_pages') {
               showToast('No Facebook Pages found. Please create a Facebook Page first.', 'error');
             } else {
@@ -51,7 +59,7 @@ export const MetaOnboarding = ({ onAccountConnected }) => {
           if (onAccountConnected) onAccountConnected();
         }
       } catch (e) {
-        // Cross-origin error — popup is on Facebook domain, still waiting
+        // Cross-origin error — popup is on Facebook/Instagram domain, still waiting
       }
 
       if (popup && popup.closed) {

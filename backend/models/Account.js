@@ -18,17 +18,22 @@ const accountSchema = new mongoose.Schema({
   },
   facebookPageId: {
     type: String,
-    required: true
+    default: null
   },
   facebookPageName: {
     type: String,
-    required: true
+    default: null
   },
   instagramAccountId: {
     type: String,
     default: null
   },
   instagramUsername: {
+    type: String,
+    default: null
+  },
+  // For Instagram-only accounts (connected via Instagram Login API directly)
+  instagramAccessToken: {
     type: String,
     default: null
   },

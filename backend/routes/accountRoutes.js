@@ -3,12 +3,14 @@ import jwt from 'jsonwebtoken';
 import Account from '../models/Account.js';
 import User from '../models/User.js';
 import { protect } from '../middleware/authMiddleware.js';
-import { exchangeShortToLongToken, getUserPagesAndInstagram } from '../services/metaService.js';
+import { exchangeShortToLongToken, getUserPagesAndInstagram, exchangeInstagramCode, getInstagramUserInfo, getInstagramLongLivedToken } from '../services/metaService.js';
 
 const META_APP_ID = process.env.META_APP_ID;
 const META_APP_SECRET = process.env.META_APP_SECRET;
-const BACKEND_URL = process.env.BACKEND_URL || 'https://meta-auto-post-tools.onrender.com';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://meta-auto-post-tools.vercel.app';
+const IG_APP_ID = process.env.IG_APP_ID;
+const IG_APP_SECRET = process.env.IG_APP_SECRET;
+const BACKEND_URL = process.env.BACKEND_URL || 'https://post-automation-tools.onrender.com';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://post-automation-tools.vercel.app';
 
 const router = express.Router();
 
@@ -152,6 +154,113 @@ router.get('/meta-callback', async (req, res) => {
     res.redirect(`${frontendUrl}/accounts?oauth_success=true`);
   } catch (err) {
     console.error('Meta OAuth callback error:', err.message);
+    res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
+// ─── INSTAGRAM DIRECT OAUTH ROUTES (Instagram Login API) ────────────────────
+
+// @route   GET /api/accounts/instagram-initiate
+// @desc    Start Instagram Direct OAuth — opens instagram.com login
+// @access  Public (JWT passed as query param)
+router.get('/instagram-initiate', (req, res) => {
+  const { authToken } = req.query;
+
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+  const backendUrl = process.env.BACKEND_URL || `${protocol}://${host}`;
+  const frontendUrl = req.headers.referer
+    ? new URL(req.headers.referer).origin
+    : (process.env.FRONTEND_URL || 'http://localhost:5173');
+
+  const callbackUri = `${backendUrl}/api/accounts/instagram-callback`;
+  const state = Buffer.from(JSON.stringify({ authToken, callbackUri, frontendUrl })).toString('base64url');
+
+  const scope = 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments';
+
+  const igUrl = `https://api.instagram.com/oauth/authorize?client_id=${IG_APP_ID}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${state}`;
+
+  res.redirect(igUrl);
+});
+
+// @route   GET /api/accounts/instagram-callback
+// @desc    Handle Instagram OAuth callback — exchange code for token, save account
+// @access  Public
+router.get('/instagram-callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+  let callbackUri = `${process.env.BACKEND_URL || `${protocol}://${host}`}/api/accounts/instagram-callback`;
+  let authToken = null;
+
+  try {
+    if (state) {
+      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+      if (decoded.frontendUrl) frontendUrl = decoded.frontendUrl;
+      if (decoded.callbackUri) callbackUri = decoded.callbackUri;
+      if (decoded.authToken) authToken = decoded.authToken;
+    }
+  } catch (e) {
+    console.error('Instagram state parse error:', e.message);
+  }
+
+  if (error) {
+    return res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(error)}`);
+  }
+
+  try {
+    if (!authToken) {
+      return res.redirect(`${frontendUrl}/accounts?oauth_error=missing_auth_token`);
+    }
+
+    // Verify JWT → get user
+    const decoded = jwt.verify(authToken, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) return res.redirect(`${frontendUrl}/accounts?oauth_error=user_not_found`);
+
+    // Exchange code for short-lived token
+    const shortToken = await exchangeInstagramCode({ code, callbackUri, appId: IG_APP_ID, appSecret: IG_APP_SECRET });
+
+    // Exchange for long-lived token (60 days)
+    const longToken = await getInstagramLongLivedToken({ shortToken, appSecret: IG_APP_SECRET });
+
+    // Get Instagram user info
+    const igUser = await getInstagramUserInfo(longToken);
+
+    console.log('📸 Instagram user info:', igUser);
+
+    if (!igUser || !igUser.id) {
+      return res.redirect(`${frontendUrl}/accounts?oauth_error=instagram_user_not_found`);
+    }
+
+    // Save or update Instagram account in DB
+    const existingIg = await Account.findOne({ userId: user._id, instagramAccountId: igUser.id, platform: 'instagram' });
+
+    if (existingIg) {
+      existingIg.instagramAccessToken = longToken;
+      existingIg.accessToken = longToken;
+      existingIg.accountName = `@${igUser.username} (Instagram)`;
+      existingIg.instagramUsername = igUser.username;
+      if (igUser.profile_picture_url) existingIg.avatarUrl = igUser.profile_picture_url;
+      await existingIg.save();
+    } else {
+      await Account.create({
+        userId: user._id,
+        platform: 'instagram',
+        accountName: `@${igUser.username} (Instagram)`,
+        instagramAccountId: igUser.id,
+        instagramUsername: igUser.username,
+        instagramAccessToken: longToken,
+        accessToken: longToken,
+        avatarUrl: igUser.profile_picture_url || 'https://images.unsplash.com/photo-1611262588024-d12430b98920?auto=format&fit=crop&w=150&q=80'
+      });
+    }
+
+    res.redirect(`${frontendUrl}/accounts?oauth_success=true&platform=instagram`);
+  } catch (err) {
+    console.error('Instagram OAuth callback error:', err.message);
     res.redirect(`${frontendUrl}/accounts?oauth_error=${encodeURIComponent(err.message)}`);
   }
 });

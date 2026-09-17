@@ -62,10 +62,14 @@ const processScheduledPosts = async () => {
         }
 
         // Publish to Instagram Business Account
+        // Supports both: direct Instagram Login API accounts AND Facebook-linked accounts
         if ((account.platform === 'instagram' || account.platform === 'both') && account.instagramAccountId) {
+          // Prefer instagramAccessToken (direct Instagram login) over pageAccessToken (Facebook-linked)
+          const igToken = account.instagramAccessToken || account.accessToken;
+
           const igRes = await publishToInstagramBusiness({
             igUserId: account.instagramAccountId,
-            pageAccessToken: account.accessToken,
+            pageAccessToken: igToken,
             caption: post.caption,
             mediaUrl: post.mediaUrl
           });

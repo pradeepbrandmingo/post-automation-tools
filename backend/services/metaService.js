@@ -78,11 +78,12 @@ const publishToFacebookPage = async ({ pageId, pageAccessToken, caption, mediaUr
 
 /**
  * Publish Post to Instagram Business Account (2-Step Container Workflow)
+ * Supports both Direct Instagram User Access Tokens and Facebook Page Access Tokens
  */
 const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, mediaUrl }) => {
   try {
     if (!igUserId) {
-      throw new Error('No Instagram Business Account linked to this Facebook Page');
+      throw new Error('No Instagram Business Account linked');
     }
     if (!mediaUrl) {
       throw new Error('Instagram requires an image or video URL for posts');
@@ -94,14 +95,34 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       finalMediaUrl = finalMediaUrl.replace('/upload/', '/upload/f_jpg,q_auto/');
     }
 
+    // Determine primary endpoint: Direct Instagram tokens (IGAA...) use graph.instagram.com, FB tokens (EAAB...) use graph.facebook.com
+    const isDirectIg = String(pageAccessToken).startsWith('IG') || String(pageAccessToken).includes('IG');
+    const primaryBase = isDirectIg ? 'https://graph.instagram.com/v19.0' : BASE_URL;
+    const fallbackBase = isDirectIg ? BASE_URL : 'https://graph.instagram.com/v19.0';
+
+    console.log(`🚀 Publishing to Instagram (${igUserId}) using primary base: ${primaryBase}`);
+
     // Step 1: Create Container
-    const containerRes = await axios.post(`${BASE_URL}/${igUserId}/media`, null, {
-      params: {
-        image_url: finalMediaUrl,
-        caption: caption,
-        access_token: pageAccessToken
-      }
-    });
+    let containerRes;
+    try {
+      containerRes = await axios.post(`${primaryBase}/${igUserId}/media`, null, {
+        params: {
+          image_url: finalMediaUrl,
+          caption: caption,
+          access_token: pageAccessToken
+        }
+      });
+    } catch (err1) {
+      console.warn(`Primary container endpoint (${primaryBase}) error:`, err1.response?.data || err1.message);
+      // Try fallback base
+      containerRes = await axios.post(`${fallbackBase}/${igUserId}/media`, null, {
+        params: {
+          image_url: finalMediaUrl,
+          caption: caption,
+          access_token: pageAccessToken
+        }
+      });
+    }
 
     const creationId = containerRes.data.id;
     if (!creationId) {
@@ -120,12 +141,22 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       attempts++;
 
       try {
-        const statusRes = await axios.get(`${BASE_URL}/${creationId}`, {
-          params: {
-            fields: 'status_code',
-            access_token: pageAccessToken
-          }
-        });
+        let statusRes;
+        try {
+          statusRes = await axios.get(`${primaryBase}/${creationId}`, {
+            params: {
+              fields: 'status_code',
+              access_token: pageAccessToken
+            }
+          });
+        } catch (pollErr1) {
+          statusRes = await axios.get(`${fallbackBase}/${creationId}`, {
+            params: {
+              fields: 'status_code',
+              access_token: pageAccessToken
+            }
+          });
+        }
 
         const statusCode = statusRes.data?.status_code;
         console.log(`Instagram container ${creationId} status (attempt ${attempts}):`, statusCode);
@@ -143,12 +174,23 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
     }
 
     // Step 2: Publish Container
-    const publishRes = await axios.post(`${BASE_URL}/${igUserId}/media_publish`, null, {
-      params: {
-        creation_id: creationId,
-        access_token: pageAccessToken
-      }
-    });
+    let publishRes;
+    try {
+      publishRes = await axios.post(`${primaryBase}/${igUserId}/media_publish`, null, {
+        params: {
+          creation_id: creationId,
+          access_token: pageAccessToken
+        }
+      });
+    } catch (pubErr1) {
+      console.warn(`Primary publish endpoint (${primaryBase}) error, trying fallback base:`, pubErr1.response?.data || pubErr1.message);
+      publishRes = await axios.post(`${fallbackBase}/${igUserId}/media_publish`, null, {
+        params: {
+          creation_id: creationId,
+          access_token: pageAccessToken
+        }
+      });
+    }
 
     return {
       success: true,
@@ -224,65 +266,76 @@ const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
  * Get Instagram user profile info (id, username)
  */
 const getInstagramUserInfo = async (accessToken, fallbackUserId, fallbackUsername) => {
-  // 1. If username was provided directly in OAuth token exchange payload
-  if (fallbackUsername) {
+  // 1. If username was provided directly in OAuth payload
+  if (fallbackUsername && !fallbackUsername.startsWith('instagram_')) {
     return { id: String(fallbackUserId), username: fallbackUsername };
   }
 
-  // 2. Try graph.instagram.com/{userId}
-  if (fallbackUserId) {
-    try {
-      const response = await axios.get(`https://graph.instagram.com/${fallbackUserId}`, {
-        params: {
-          fields: 'id,username,name,profile_picture_url',
-          access_token: accessToken
-        }
-      });
-      if (response.data && response.data.username) {
-        return response.data;
-      }
-    } catch (err) {
-      console.warn('graph.instagram.com/{userId} note:', err.response?.data || err.message);
-    }
-  }
-
-  // 3. Try graph.instagram.com/me
+  // 2. Query graph.instagram.com/v19.0/me?fields=id,username
   try {
-    const response = await axios.get('https://graph.instagram.com/me', {
+    const res = await axios.get('https://graph.instagram.com/v19.0/me', {
       params: {
         fields: 'id,username',
         access_token: accessToken
       }
     });
-    if (response.data && response.data.username) {
-      return response.data;
+    if (res.data && res.data.username) {
+      return res.data;
     }
-  } catch (error) {
-    console.warn('graph.instagram.com/me query note:', error.response?.data || error.message);
+  } catch (e) {
+    console.warn('graph.instagram.com/v19.0/me note:', e.response?.data || e.message);
   }
 
-  // 4. Try graph.facebook.com/v19.0/{userId}
+  // 3. Query graph.instagram.com/me?fields=id,username
   try {
-    const endpoint = fallbackUserId ? `https://graph.facebook.com/v19.0/${fallbackUserId}` : 'https://graph.facebook.com/v19.0/me';
-    const fbResponse = await axios.get(endpoint, {
+    const res = await axios.get('https://graph.instagram.com/me', {
       params: {
-        fields: 'id,username,name',
+        fields: 'id,username',
         access_token: accessToken
       }
     });
-    if (fbResponse.data && (fbResponse.data.username || fbResponse.data.name)) {
-      return { id: fbResponse.data.id, username: fbResponse.data.username || fbResponse.data.name };
+    if (res.data && res.data.username) {
+      return res.data;
     }
-  } catch (fbErr) {
-    console.warn('graph.facebook.com/v19.0 fallback note:', fbErr.response?.data || fbErr.message);
+  } catch (e) {
+    console.warn('graph.instagram.com/me note:', e.response?.data || e.message);
   }
 
-  // 5. Fallback with userId
+  // 4. Query graph.instagram.com/v19.0/{userId}?fields=id,username
   if (fallbackUserId) {
-    return { id: String(fallbackUserId), username: `instagram_${fallbackUserId}` };
+    try {
+      const res = await axios.get(`https://graph.instagram.com/v19.0/${fallbackUserId}`, {
+        params: {
+          fields: 'id,username',
+          access_token: accessToken
+        }
+      });
+      if (res.data && res.data.username) {
+        return res.data;
+      }
+    } catch (e) {
+      console.warn(`graph.instagram.com/v19.0/${fallbackUserId} note:`, e.response?.data || e.message);
+    }
   }
 
-  throw new Error('Failed to fetch Instagram user info');
+  // 5. Query graph.facebook.com/v19.0/{userId}?fields=id,username
+  if (fallbackUserId) {
+    try {
+      const res = await axios.get(`https://graph.facebook.com/v19.0/${fallbackUserId}`, {
+        params: {
+          fields: 'id,username',
+          access_token: accessToken
+        }
+      });
+      if (res.data && res.data.username) {
+        return res.data;
+      }
+    } catch (e) {
+      console.warn(`graph.facebook.com/v19.0/${fallbackUserId} note:`, e.response?.data || e.message);
+    }
+  }
+
+  return { id: String(fallbackUserId), username: `instagram_${fallbackUserId}` };
 };
 
 export {

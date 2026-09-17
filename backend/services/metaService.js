@@ -211,20 +211,30 @@ const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
 };
 
 /**
- * Get Instagram user profile info (id, username, profile_picture_url, account_type)
+ * Get Instagram user profile info (id, username)
  */
 const getInstagramUserInfo = async (accessToken) => {
   try {
     const response = await axios.get('https://graph.instagram.com/me', {
       params: {
-        fields: 'id,username,profile_picture_url,account_type,name',
+        fields: 'id,username',
         access_token: accessToken
       }
     });
     return response.data;
   } catch (error) {
     console.error('Instagram User Info Error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.error?.message || 'Failed to fetch Instagram user info');
+    try {
+      const fbResponse = await axios.get('https://graph.facebook.com/v19.0/me', {
+        params: {
+          fields: 'id,name',
+          access_token: accessToken
+        }
+      });
+      return { id: fbResponse.data.id, username: fbResponse.data.name || fbResponse.data.id };
+    } catch (err2) {
+      throw new Error(error.response?.data?.error?.message || 'Failed to fetch Instagram user info');
+    }
   }
 };
 

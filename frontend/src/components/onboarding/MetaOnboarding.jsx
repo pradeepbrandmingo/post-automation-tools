@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Share2, Facebook, Instagram, CheckCircle2, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Share2, Facebook, Instagram, CheckCircle2, ShieldCheck, RefreshCw, AlertCircle } from 'lucide-react';
+import { api } from '../../services/api';
 import { useToast } from '../common/Toast';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 const getInitiateUrl = (platform) => {
-  const authToken = localStorage.getItem('meta_autopost_token') || '';
+  // Use api.token (in-memory) with localStorage as fallback
+  const authToken = api.token || localStorage.getItem('meta_autopost_token') || '';
   return `${API_BASE}/api/accounts/meta-initiate?platform=${platform}&authToken=${encodeURIComponent(authToken)}`;
 };
 
@@ -14,6 +16,13 @@ export const MetaOnboarding = ({ onAccountConnected }) => {
   const [loadingPlatform, setLoadingPlatform] = useState(null);
 
   const handleConnect = (platform) => {
+    // Guard: Check if JWT token exists before opening popup
+    const authToken = api.token || localStorage.getItem('meta_autopost_token') || '';
+    if (!authToken) {
+      showToast('Session expired! Please logout and login again.', 'error');
+      return;
+    }
+
     setLoadingPlatform(platform);
     showToast(`Opening ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Login...`, 'info');
 

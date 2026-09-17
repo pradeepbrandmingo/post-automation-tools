@@ -95,43 +95,53 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       finalMediaUrl = finalMediaUrl.replace('/upload/', '/upload/f_jpg,q_auto/');
     }
 
-    // Determine primary endpoint: Direct Instagram tokens (IGAA...) use graph.instagram.com, FB tokens (EAAB...) use graph.facebook.com
-    const isDirectIg = String(pageAccessToken).startsWith('IG') || String(pageAccessToken).includes('IG');
-    const primaryBase = isDirectIg ? 'https://graph.instagram.com/v19.0' : BASE_URL;
-    const fallbackBase = isDirectIg ? BASE_URL : 'https://graph.instagram.com/v19.0';
+    console.log(`🚀 Starting Instagram Publish for IG User ID: ${igUserId}`);
 
-    console.log(`🚀 Publishing to Instagram (${igUserId}) using primary base: ${primaryBase}`);
+    // Candidate endpoints for Instagram publishing
+    const candidateBases = [
+      'https://graph.instagram.com/v19.0',
+      'https://graph.instagram.com',
+      BASE_URL
+    ];
+
+    let creationId = null;
+    let workingBase = candidateBases[0];
+    let lastError = null;
 
     // Step 1: Create Container
-    let containerRes;
-    try {
-      containerRes = await axios.post(`${primaryBase}/${igUserId}/media`, null, {
-        params: {
-          image_url: finalMediaUrl,
-          caption: caption,
-          access_token: pageAccessToken
+    for (const base of candidateBases) {
+      try {
+        console.log(`Attempting container creation on ${base}/${igUserId}/media...`);
+        const res = await axios.post(`${base}/${igUserId}/media`, null, {
+          params: {
+            image_url: finalMediaUrl,
+            caption: caption,
+            access_token: pageAccessToken
+          },
+          headers: {
+            Authorization: `Bearer ${pageAccessToken}`
+          }
+        });
+
+        if (res.data && res.data.id) {
+          creationId = res.data.id;
+          workingBase = base;
+          console.log(`✅ Container created successfully on ${base}: ${creationId}`);
+          break;
         }
-      });
-    } catch (err1) {
-      console.warn(`Primary container endpoint (${primaryBase}) error:`, err1.response?.data || err1.message);
-      // Try fallback base
-      containerRes = await axios.post(`${fallbackBase}/${igUserId}/media`, null, {
-        params: {
-          image_url: finalMediaUrl,
-          caption: caption,
-          access_token: pageAccessToken
-        }
-      });
+      } catch (err) {
+        lastError = err.response?.data?.error?.message || err.message;
+        console.warn(`Container creation failed on ${base}:`, lastError);
+      }
     }
 
-    const creationId = containerRes.data.id;
     if (!creationId) {
-      throw new Error('Failed to create Instagram media container');
+      throw new Error(lastError || 'Failed to create Instagram media container across all endpoints');
     }
 
     console.log(`⏳ Instagram container created: ${creationId}. Waiting for processing...`);
 
-    // Poll container status until FINISHED (Meta processes media asynchronously)
+    // Poll container status until FINISHED
     let isReady = false;
     let attempts = 0;
     const maxAttempts = 10;
@@ -141,22 +151,15 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       attempts++;
 
       try {
-        let statusRes;
-        try {
-          statusRes = await axios.get(`${primaryBase}/${creationId}`, {
-            params: {
-              fields: 'status_code',
-              access_token: pageAccessToken
-            }
-          });
-        } catch (pollErr1) {
-          statusRes = await axios.get(`${fallbackBase}/${creationId}`, {
-            params: {
-              fields: 'status_code',
-              access_token: pageAccessToken
-            }
-          });
-        }
+        const statusRes = await axios.get(`${workingBase}/${creationId}`, {
+          params: {
+            fields: 'status_code',
+            access_token: pageAccessToken
+          },
+          headers: {
+            Authorization: `Bearer ${pageAccessToken}`
+          }
+        });
 
         const statusCode = statusRes.data?.status_code;
         console.log(`Instagram container ${creationId} status (attempt ${attempts}):`, statusCode);
@@ -174,22 +177,40 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
     }
 
     // Step 2: Publish Container
-    let publishRes;
+    let publishRes = null;
     try {
-      publishRes = await axios.post(`${primaryBase}/${igUserId}/media_publish`, null, {
+      publishRes = await axios.post(`${workingBase}/${igUserId}/media_publish`, null, {
         params: {
           creation_id: creationId,
           access_token: pageAccessToken
+        },
+        headers: {
+          Authorization: `Bearer ${pageAccessToken}`
         }
       });
-    } catch (pubErr1) {
-      console.warn(`Primary publish endpoint (${primaryBase}) error, trying fallback base:`, pubErr1.response?.data || pubErr1.message);
-      publishRes = await axios.post(`${fallbackBase}/${igUserId}/media_publish`, null, {
-        params: {
-          creation_id: creationId,
-          access_token: pageAccessToken
+    } catch (pubErr) {
+      console.warn(`Publish failed on primary ${workingBase}, trying fallback bases...`);
+      for (const base of candidateBases) {
+        if (base === workingBase) continue;
+        try {
+          publishRes = await axios.post(`${base}/${igUserId}/media_publish`, null, {
+            params: {
+              creation_id: creationId,
+              access_token: pageAccessToken
+            },
+            headers: {
+              Authorization: `Bearer ${pageAccessToken}`
+            }
+          });
+          if (publishRes.data && publishRes.data.id) break;
+        } catch (e) {
+          console.warn(`Publish fallback on ${base} failed:`, e.message);
         }
-      });
+      }
+    }
+
+    if (!publishRes || !publishRes.data || !publishRes.data.id) {
+      throw new Error('Failed to publish container on Instagram');
     }
 
     return {

@@ -108,6 +108,40 @@ const publishToInstagramBusiness = async ({ igUserId, pageAccessToken, caption, 
       throw new Error('Failed to create Instagram media container');
     }
 
+    console.log(`⏳ Instagram container created: ${creationId}. Waiting for processing...`);
+
+    // Poll container status until FINISHED (Meta processes media asynchronously)
+    let isReady = false;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    while (!isReady && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      attempts++;
+
+      try {
+        const statusRes = await axios.get(`${BASE_URL}/${creationId}`, {
+          params: {
+            fields: 'status_code',
+            access_token: pageAccessToken
+          }
+        });
+
+        const statusCode = statusRes.data?.status_code;
+        console.log(`Instagram container ${creationId} status (attempt ${attempts}):`, statusCode);
+
+        if (statusCode === 'FINISHED') {
+          isReady = true;
+          break;
+        } else if (statusCode === 'ERROR') {
+          throw new Error('Instagram rejected the media (invalid format, aspect ratio, or corrupt file)');
+        }
+      } catch (pollErr) {
+        if (pollErr.message.includes('Instagram rejected')) throw pollErr;
+        console.warn(`Container polling attempt ${attempts} warning:`, pollErr.message);
+      }
+    }
+
     // Step 2: Publish Container
     const publishRes = await axios.post(`${BASE_URL}/${igUserId}/media_publish`, null, {
       params: {

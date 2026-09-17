@@ -184,10 +184,16 @@ const exchangeInstagramCode = async ({ code, callbackUri, appId, appSecret }) =>
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
-    return response.data.access_token;
+    console.log('📸 Instagram OAuth token exchange success:', response.data);
+
+    return {
+      accessToken: response.data.access_token,
+      userId: response.data.user_id || response.data.id,
+      data: response.data
+    };
   } catch (error) {
     console.error('Instagram Code Exchange Error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.error_message || 'Failed to exchange Instagram code');
+    throw new Error(error.response?.data?.error_message || error.response?.data?.error?.message || 'Failed to exchange Instagram code');
   }
 };
 
@@ -203,17 +209,21 @@ const getInstagramLongLivedToken = async ({ shortToken, appSecret }) => {
         access_token: shortToken
       }
     });
-    return response.data.access_token;
+    if (response.data && response.data.access_token) {
+      return response.data.access_token;
+    }
+    return shortToken;
   } catch (error) {
-    console.error('Instagram Long-Lived Token Error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.error?.message || 'Failed to get long-lived Instagram token');
+    console.warn('Instagram Long-Lived Token warning (falling back to shortToken):', error.response?.data || error.message);
+    return shortToken;
   }
 };
 
 /**
  * Get Instagram user profile info (id, username)
  */
-const getInstagramUserInfo = async (accessToken) => {
+const getInstagramUserInfo = async (accessToken, fallbackUserId) => {
+  // 1. Try graph.instagram.com/me
   try {
     const response = await axios.get('https://graph.instagram.com/me', {
       params: {
@@ -221,21 +231,34 @@ const getInstagramUserInfo = async (accessToken) => {
         access_token: accessToken
       }
     });
-    return response.data;
-  } catch (error) {
-    console.error('Instagram User Info Error:', error.response?.data || error.message);
-    try {
-      const fbResponse = await axios.get('https://graph.facebook.com/v19.0/me', {
-        params: {
-          fields: 'id,name',
-          access_token: accessToken
-        }
-      });
-      return { id: fbResponse.data.id, username: fbResponse.data.name || fbResponse.data.id };
-    } catch (err2) {
-      throw new Error(error.response?.data?.error?.message || 'Failed to fetch Instagram user info');
+    if (response.data && response.data.id) {
+      return response.data;
     }
+  } catch (error) {
+    console.warn('graph.instagram.com/me query note:', error.response?.data || error.message);
   }
+
+  // 2. Try graph.facebook.com/v19.0/me
+  try {
+    const fbResponse = await axios.get('https://graph.facebook.com/v19.0/me', {
+      params: {
+        fields: 'id,name',
+        access_token: accessToken
+      }
+    });
+    if (fbResponse.data && fbResponse.data.id) {
+      return { id: fbResponse.data.id, username: fbResponse.data.name || fbResponse.data.id };
+    }
+  } catch (fbErr) {
+    console.warn('graph.facebook.com/v19.0/me fallback note:', fbErr.response?.data || fbErr.message);
+  }
+
+  // 3. If API rejected GET on /me, use fallbackUserId from initial token exchange
+  if (fallbackUserId) {
+    return { id: String(fallbackUserId), username: `instagram_${fallbackUserId}` };
+  }
+
+  throw new Error('Failed to fetch Instagram user info');
 };
 
 export {

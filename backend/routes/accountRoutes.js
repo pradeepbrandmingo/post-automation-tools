@@ -21,8 +21,8 @@ router.get('/meta-initiate', (req, res) => {
   const { platform, authToken } = req.query;
 
   const scope = platform === 'instagram'
-    ? 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,instagram_content_publish,instagram_basic'
-    : 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts';
+    ? 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,instagram_content_publish,instagram_basic,business_management'
+    : 'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,business_management';
 
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
   const host = req.get('host');
@@ -36,7 +36,7 @@ router.get('/meta-initiate', (req, res) => {
   const callbackUri = `${backendUrl}/api/accounts/meta-callback`;
   const state = Buffer.from(JSON.stringify({ authToken, platform: platform || 'facebook', callbackUri, frontendUrl })).toString('base64url');
 
-  const metaUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${state}`;
+  const metaUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${state}&auth_type=rerequest`;
 
   res.redirect(metaUrl);
 });
@@ -94,8 +94,11 @@ router.get('/meta-callback', async (req, res) => {
 
     // Fetch Facebook Pages & Instagram Business Accounts
     const pages = await getUserPagesAndInstagram(longLivedToken);
+    console.log('📄 Meta returned pages count:', pages.length);
+    console.log('📄 Meta pages detail:', JSON.stringify(pages, null, 2));
 
     if (pages.length === 0) {
+      console.warn('⚠️ No pages returned by Meta Graph API');
       return res.redirect(`${frontendUrl}/accounts?oauth_error=no_pages`);
     }
 
